@@ -32,8 +32,9 @@ class slcan_node : public rclcpp::Node
 	rclcpp::Publisher<can_msgs::msg::CanMsg>::SharedPtr m_pub_data;
 	rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr m_uart_fail_pub;
 	rclcpp::TimerBase::SharedPtr m_recv_timer;
+	rclcpp::TimerBase::SharedPtr m_send_timer;
 
-	std::thread m_write;
+	std::queue<can_msgs::msg::CanMsg::SharedPtr> m_message_queue;
 
 	bool open_serial_port();
 
@@ -52,6 +53,8 @@ class slcan_node : public rclcpp::Node
 	can_msgs::msg::CanMsg decode_data(const std::string &data);
 
 	void sub_callback(can_msgs::msg::CanMsg::SharedPtr msg);
+
+	void transmit_timer_callback();
 	
 public:
 	slcan_node();
