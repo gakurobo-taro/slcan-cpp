@@ -16,6 +16,7 @@ slcan_node::slcan_node() : rclcpp::Node("slcan_node")
 	m_recv_timer = this->create_wall_timer(
 		1ms, std::bind(&slcan_node::recv_timer_callback, this));
 	m_uart_fail_pub = this->create_publisher<std_msgs::msg::Bool>("uart_fail", 10);
+	m_send_timer = this->create_wall_timer(1ms, std::bind(&slcan_node::transmit_timer_callback, this));
 
 	auto is_open = this->open_serial_port();
 
@@ -67,7 +68,7 @@ bool slcan_node::open_serial_port()
 	}
 
 	// シリアルポートをオープン
-	m_fd = open(device.c_str(), O_RDWR | O_NOCTTY | O_SYNC);
+	m_fd = open(device.c_str(), O_RDWR | O_NOCTTY);
 	if (m_fd < 0) 
 	{
 		RCLCPP_ERROR(this->get_logger(), "can't open %s", device.c_str());
@@ -94,14 +95,14 @@ bool slcan_node::open_serial_port()
 		return false;
 	}
 
+	bzero(&term, sizeof(term));
+
 	cfsetospeed(&term, UART_BAUDRATE);
 	cfsetispeed(&term, UART_BAUDRATE);
-	term.c_cflag &= ~CSIZE;
-	term.c_cflag |= CS8;
-	term.c_cflag &= ~CRTSCTS;
-	term.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
-	term.c_iflag &= ~(IXON | IXOFF | IXANY | ICRNL | INLCR | IGNCR);
-	term.c_oflag &= ~OPOST;
+	term.c_cflag |= UART_BAUDRATE | CS8 | CREAD;
+	term.c_lflag |= ICANON;
+	term.c_iflag = ICRNL | IGNPAR;
+	term.c_oflag = 0;
 	term.c_cc[VMIN] = 0;
 	term.c_cc[VTIME]= 0;
 
@@ -126,7 +127,7 @@ void slcan_node::send(const std::string& data)
 {
 	tcdrain(m_fd);
 	
-	int ret = ::write(m_fd, data.c_str(), data.size());
+	::write(m_fd, data.c_str(), data.size());
 #if SHOW_SENDING_MSG
 	RCLCPP_INFO(this->get_logger(), "send: %s", data.c_str());
 #endif // SHOW_SENDING
@@ -144,7 +145,7 @@ void slcan_node::recv_timer_callback()
 		return ;
 	}
 	
-	constexpr size_t buffer_size = 19;
+	constexpr size_t buffer_size = 256;
 	char buff[buffer_size];
 
 	int n = read(m_fd, buff, buffer_size);
@@ -281,24 +282,18 @@ can_msgs::msg::CanMsg slcan_node::decode_data(const std::string &data)
 
 void slcan_node::sub_callback(const can_msgs::msg::CanMsg::SharedPtr msg) 
 {
-	auto data = encode_data(*msg);
+	m_message_queue.push(msg);
+}
 
-	send(data);
-
-	auto data_msg = decode_data(data);
-
-	if(msg->data.size() == 4)
+void slcan_node::transmit_timer_callback()
+{
+	while(m_message_queue.size() > 0)
 	{
-		uint32_t data = 0;
-		for(uint32_t i = 0; i < msg->data.size(); i++)
-		{
-			data |= data_msg.data[i] << (8*i);
-		}
-		auto f = std::bit_cast<float>(data);
+		auto msg = m_message_queue.front();
+        m_message_queue.pop();
 
-	#if SHOW_SUBSCRIPTION
-		RCLCPP_INFO(this->get_logger(), "msg: {id: %x ,data: %f}", data_msg.id, f);
-	#endif // SHOW_SUBSCRIPTION
+        send(encode_data(*msg));
+
+        RCLCPP_INFO(this->get_logger(), "send: %s", encode_data(*msg).c_str());
 	}
-	
 }
