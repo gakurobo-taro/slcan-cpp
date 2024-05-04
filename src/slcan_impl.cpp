@@ -68,7 +68,7 @@ bool slcan_node::open_serial_port()
 	}
 
 	// シリアルポートをオープン
-	m_fd = open(device.c_str(), O_RDWR | O_NOCTTY | O_SYNC);
+	m_fd = open(device.c_str(), O_RDWR | O_NOCTTY);
 	if (m_fd < 0) 
 	{
 		RCLCPP_ERROR(this->get_logger(), "can't open %s", device.c_str());
@@ -95,14 +95,14 @@ bool slcan_node::open_serial_port()
 		return false;
 	}
 
+	bzero(&term, sizeof(term));
+
 	cfsetospeed(&term, UART_BAUDRATE);
 	cfsetispeed(&term, UART_BAUDRATE);
-	term.c_cflag &= ~CSIZE;
-	term.c_cflag |= CS8;
-	term.c_cflag &= ~CRTSCTS;
-	term.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
-	term.c_iflag &= ~(IXON | IXOFF | IXANY | ICRNL | INLCR | IGNCR);
-	term.c_oflag &= ~OPOST;
+	term.c_cflag |= UART_BAUDRATE | CS8 | CREAD;
+	term.c_lflag |= ICANON;
+	term.c_iflag = ICRNL | IGNPAR;
+	term.c_oflag = 0;
 	term.c_cc[VMIN] = 0;
 	term.c_cc[VTIME]= 0;
 
@@ -145,7 +145,7 @@ void slcan_node::recv_timer_callback()
 		return ;
 	}
 	
-	constexpr size_t buffer_size = 19;
+	constexpr size_t buffer_size = 256;
 	char buff[buffer_size];
 
 	int n = read(m_fd, buff, buffer_size);
